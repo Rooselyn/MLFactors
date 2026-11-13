@@ -1,0 +1,21 @@
+"""PyTI
+
+公式：完整数值定义为附录独立函数pyti_standard_variance_standard_variance；固定参数={'period': 20}；原目录定义：源码算子/递推链：sv = [var(data[idx + 1 - period:idx + 1], ddof=1) for idx in range(period - 1, len(data))]；输出=sv；[确切算法](https://github.com/kylejusticemagnuson/pyti/blob/dd3e8a8cac846f0ecf28ff2a6454265bb40f1573/pyti/standard_variance.py#L6)；原目录：standard_variance.standard_variance（period等由调用方指定）；追踪：PF01450；[来源](https://github.com/kylejusticemagnuson/pyti)。
+实现约定见公开因子库报告；共享数值实现位于已有的 factors/base.py。
+"""
+from factors.inputs import ParquetInput, fixed_factor
+from factors.registry import register_factor
+from factors.base import PublicFactor
+
+INPUTS = {
+    'close_hfq': ParquetInput('MLFactors/data/zz500/stock_day/*/*.parquet', 'close_hfq'),
+}
+SPEC = {'name': 'pyti_standard_variance_20d', 'root_function': 'pyti_standard_variance_standard_variance', 'required_inputs': ['data'], 'parameters': {'period': 20}, 'supplied_parameters': {'period': 20}, 'output_index': 0, 'output_label': 'standard_variance', 'kernel': 'kernel_7debff888248035f', 'engine': 'pyti', 'minimum': 1, 'gate_bars': 1}
+
+@register_factor
+@fixed_factor('pyti_standard_variance_20d', {})
+class Factor_pyti_standard_variance_20d(PublicFactor):
+    name = 'pyti_standard_variance_20d'
+    description = "完整数值定义为附录独立函数pyti_standard_variance_standard_variance；固定参数={'period': 20}；原目录定义：源码算子/递推链：sv = [var(data[idx + 1 - period:idx + 1], ddof=1) for idx in range(period - 1, len(data))]；输出=sv；[确切算法](https://github.com/kylejusticemagnuson/pyti/blob/dd3e8a8cac846f0ecf28ff2a6454265bb40f1573/pyti/standard_variance.py#L6)；原目录：standard_variance.standard_variance（period等由调用方指定）；追踪：PF01450；[来源](https://github.com/kylejusticemagnuson/pyti)。"
+    INPUTS = INPUTS
+    SPEC = SPEC

@@ -1,0 +1,137 @@
+"""量谷加权价格分位点：按同一钟点此前20日量均值μ与标准差σ，E=1(v>μ+σ)；P_m=E_m(1−E_{m−1})(1−E_{m+1})，R=E−P，G=1−E；P_S=Σ_Svc/Σ_Sv；H*=max(H,L,C_{−1})，L*=min(H,L,C_{−1})；Q_S=mean20[(P_S−L*)/(H*−L*)]；输出Res(Q_G∣Ret20)。
+
+来源: [开源《横看成岭侧成峰：日内成交量状态的划分与因子构建》原作者全文](https://finance.sina.com.cn/roll/2025-07-20/doc-infhcnsm4121126.shtml)
+"""
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+from factors.base import MinuteFactor
+from factors.inputs import ParquetInput, fixed_factor
+from factors.registry import register_factor
+
+
+INPUTS = {
+    'high_hfq': ParquetInput("MLFactors/data/zz500/stock_day/*/*.parquet", 'high_hfq'),
+    'low_hfq': ParquetInput("MLFactors/data/zz500/stock_day/*/*.parquet", 'low_hfq'),
+    'close_hfq': ParquetInput("MLFactors/data/zz500/stock_day/*/*.parquet", 'close_hfq'),
+}
+MINUTE_INPUTS = {
+    'close': ParquetInput("MLFactors/data/zz500/stock_minute/*/*.parquet", 'close', date_column='trade_time', adjustment=ParquetInput("MLFactors/data/zz500/stock_day/*/*.parquet", 'adj_factor')),
+    'vol': ParquetInput("MLFactors/data/zz500/stock_minute/*/*.parquet", 'vol', date_column='trade_time'),
+}
+
+def res(y, regressors, eligible):
+    result = y * np.nan
+    for day in y.index:
+        yy = y.loc[day].where(eligible.loc[day])
+        xx = pd.concat([v.loc[day] for v in regressors], axis=1)
+        valid = yy.notna() & xx.notna().all(axis=1)
+        design = np.column_stack([np.ones(valid.sum()), xx.loc[valid].to_numpy(dtype=float)])
+        if valid.sum() < max(20, 2 * design.shape[1]) or np.linalg.matrix_rank(design) != design.shape[1]:
+            continue
+        target = yy.loc[valid].to_numpy(dtype=float)
+        result.loc[day, valid] = target - design @ np.linalg.lstsq(design, target, rcond=None)[0]
+    return result
+
+def residual_series(y, xs):
+    target=y.rename(None).to_frame().T
+    return res(target,[a.rename(None).to_frame().T for a in xs],target.notna()).iloc[0]
+
+def grid(day):
+    day=pd.Timestamp(day).normalize()
+    return pd.date_range(day+pd.Timedelta('9h31min'),day+pd.Timedelta('11h30min'),freq='min').append(
+        pd.date_range(day+pd.Timedelta('13h1min'),day+pd.Timedelta('15h'),freq='min'))
+
+def lag(x, n=1):
+    result=x.shift(n)
+    result.iloc[:n]=np.nan
+    result.iloc[120:120+n]=np.nan
+    return result
+
+def aggregate(frame, operation='mean', n=20):
+    frame=frame.tail(n)
+    answer=getattr(frame,operation)(axis=0)
+    return answer.where(frame.notna().sum()==n) if len(frame)==n else answer*np.nan
+
+def day_panels(minute_data,day,symbols,fields,daily_data):
+    index=grid(day)
+    result={}
+    day_data=minute_data.loc[(slice(index[0],index[-1]),slice(None)),list(fields)]
+    for field in fields:
+        value=day_data[field].unstack('symbol').reindex(index=index,columns=symbols).astype(float)
+        value=value.where(np.isfinite(value)&(value.ge(0) if field in ['vol','amount'] else value.gt(0)))
+        result[field]=value
+    eligible=daily_data['is_member'].unstack('symbol').reindex(index=[day],columns=symbols).fillna(False).iloc[0].astype(bool)
+    for state in ['is_st','is_suspended']:
+        eligible &= ~daily_data[state].unstack('symbol').reindex(index=[day],columns=symbols).fillna(True).iloc[0].astype(bool)
+    valid=pd.DataFrame(True,index=index,columns=symbols)
+    for value in result.values():valid &= value.notna()
+    if {'high','low'}<=result.keys():
+        valid &= result['high'].ge(result['low'])
+        for field in ['open','close']:
+            if field in result:valid &= result[field].ge(result['low']) & result[field].le(result['high'])
+    valid.loc[:,~eligible]=False
+    for field in result:result[field]=result[field].where(valid)
+    return result
+
+def daily_panel(data,field):
+    return data[field].unstack('symbol').sort_index()
+
+def current(data,field,day,columns):
+    return daily_panel(data,field).reindex(index=[day],columns=columns).iloc[0]
+
+def classified_history(minute_data,daily_data,universe,fields):
+    days=pd.DatetimeIndex(minute_data.attrs['trade_dates'])
+    ps=[day_panels(minute_data,d,universe,fields,daily_data) for d in days]
+    output=[]
+    for i in range(20,len(days)):
+        p=ps[i]
+        history=np.stack([ps[j]['vol'].to_numpy() for j in range(i-20,i)])
+        mean=np.mean(history,axis=0);std=np.std(history,axis=0,ddof=1)
+        baseline=pd.DataFrame(mean+std,index=p['vol'].index,columns=universe)
+        valid=baseline.notna()&p['vol'].notna()
+        e=p['vol'].gt(baseline).astype(float).where(valid)
+        before=lag(e);after=e.shift(-1);after.iloc[[119,239]]=np.nan
+        peak=(e*(1-before)*(1-after)).where(before.notna()&after.notna())
+        ridge=e-peak;valley=(1-e).where(valid)
+        output.append((days[i],p,e,peak,ridge,valley))
+    return output
+
+
+
+@register_factor
+@fixed_factor('rpt_ky_valley_price_position_20d', {})
+class Factor_rpt_ky_valley_price_position_20d(MinuteFactor):
+    name = 'rpt_ky_valley_price_position_20d'
+    description = '量谷加权价格分位点'
+    INPUTS = INPUTS
+    MINUTE_INPUTS = MINUTE_INPUTS
+    warmup_days = 39
+
+    def __init__(self):
+        super().__init__(('close', 'vol'),minute_window_days=40)
+        self._day_cache = {}
+
+    def calculate_daily_factor(self, trade_date, symbols, daily_data, minute_data):
+        universe=sorted(set(minute_data.index.get_level_values('symbol')) | set(symbols))
+        history=classified_history(minute_data,daily_data,universe,self.minute_fields)
+        if len(history)!=20:return pd.Series(np.nan,index=symbols)
+
+        values=[]
+        for day,p,e,peak,ridge,valley in history:
+            v,c=p['vol'],p['close']
+            weights={}
+            for key,state in [('peak',peak),('ridge',ridge),('valley',valley),('all',c.notna().astype(float))]:
+                vv=v.where(state==1)
+                weights[key]=(vv*c).sum(min_count=1)/vv.sum(min_count=1).replace(0,np.nan)
+            h=current(daily_data,'high_hfq',day,universe)
+            l=current(daily_data,'low_hfq',day,universe)
+            prev=daily_panel(daily_data,'close_hfq').shift(1).loc[day].reindex(universe)
+            high=np.maximum(h,prev);low=np.minimum(l,prev)
+            result=(weights['valley']-low)/(high-low).replace(0,np.nan)
+            values.append(result.where(c.count()>=180))
+        value=aggregate(pd.DataFrame(values))
+        c=daily_panel(daily_data,'close_hfq').reindex(columns=universe)
+        value=residual_series(value,[(c/c.shift(20)-1).loc[trade_date]])
+        return value.reindex(symbols).astype(float).replace([np.inf,-np.inf],np.nan).rename(self.name)

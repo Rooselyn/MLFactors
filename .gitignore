@@ -1,68 +1,57 @@
-# Python
+# Raw data and generated results never belong in the repository.
+/data/
+/outputs/
+
+# Python caches and local build artifacts
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-.Python
-*.egg
 *.egg-info/
-dist/
 build/
-eggs/
-parts/
-var/
-sdist/
-develop-eggs/
-.installed.cfg
-lib/
-lib64/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
 
-# Virtual environments
+# Virtual environments and credentials
 .venv/
 venv/
 env/
 ENV/
+.env
+*.env
 
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
-
-# Distribution / packaging
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-htmlcov/
-.pytest_cache/
+# Runtime files and local analysis outputs
+/.runtime/
+/logs/
+/cache/
+/outputs_new/
+/factor_results*/
+/scheme_outputs*/
+/scheme_factor_results/
+/tmp_analysis/
+/tmp_data/
+/debug*/
 *.log
-
-# Data & cache
-cache/
 *.parquet
 *.feather
 *.h5
 *.hdf5
 *.pkl
 *.pickle
+*.pt
+*.pth
 
-# Outputs
-outputs/
-
-# IDE
+# Archives and editor files
+*.tar
+*.tar.*
+*.zip
+*.zst
 .vscode/
 .idea/
+.DS_Store
 *.swp
 *.swo
-.DS_Store
-
-# Secrets / env
-.env
-*.env
-
-.codex/**
-lab/**
-record/**
-factor_results/**
-scheme_outputs/**
-debug*/**
+/.codex/
